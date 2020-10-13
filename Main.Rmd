@@ -1,0 +1,387 @@
+---
+title: "Simulating the 2018 Midterm Elections in the United States with Probability Theory"
+author: "JJ Balisanyuka-Smith and Koji Flynn-Do"
+date: "5/21/2020"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+```{r setup, include=FALSE}
+library(tidyverse)
+#Remove scientific display
+options(scipen=999)
+```
+
+## Introduction
+How representative is Congress? Currently in its 116th iteration, [Congress is the most racially and ethnically diverse in history (for the fifth time in a row)](https://www.pewresearch.org/fact-tank/2019/02/08/for-the-fifth-time-in-a-row-the-new-congress-is-the-most-racially-and-ethnically-diverse-ever/). While the country as a whole is now [nearly 40 percent non-White](https://www.census.gov/quickfacts/fact/table/US/PST045219) only 22% of voting members of Congress are racial minorities. Moreover, 90 percent of non-White Congressional members are Democrats, while just 10 percent are Republicans. So, it would seem that at country-level statistics Congress remains whiter than the population at large. 
+
+However, it is not the country at large which elects Congress members, but the districts which they represent. So, we seek to investigate how representative Congressional members are to their own districts. We do this by simulating the Senate, as well as two states which are particularly interesting for their racial composition and partisan competition: Pennsylvania and Texas.
+
+This work applies probability theory and demographic data to simulate the 2018 midterm elections in the United States. We are interested in building an elections model to forecast elections with the tools developed in Probability and evaluating its fidelity to actual data.
+
+We use datasets from FiveThirtyEight for our partisanship data. Among other things, FiveThirtyEight builds models to forecast the outcomes of elections and publishes the datasets they use to do so. Specifically, we use their 2018 [Partisan Lean](https://github.com/fivethirtyeight/data/tree/master/partisan-lean) datasets from both the House and the Senate. Our racial demographic data comes from the US Census Bureau. For state-level data, we draw from the American Community Survey [2018 Population Estimates](https://www.census.gov/quickfacts/fact/table/CA,US). For district-level data, we use the ["My Congresssional District"](https://www.census.gov/mycd/?st=42&cd=01) tool for Pennsylvania and [2015 Census Bureau estimates](https://ballotpedia.org/Demographics_of_congressional_districts_as_of_2015_(as_percentages)) for Texas.
+
+We build a model for Congressional elections which simulates both partisan affiliation and racial demographics using this data, and find that, in all three cases (the Senate, Pennsylvania, and Texas), representatives "should" be less White than they in fact are. On the partisan side, our model is relatively accurate in predicting the aggregate number of representatives from each party.
+
+We move to the model now.
+
+### The Basic Partisan Model
+The basic model involves scaling up Bernoulli trials to elections, and then simulating those elections many times. 
+
+We begin by defining $X$ as a *single voter* casting a ballot for the Republican candidate with probability $p$. Then, $X \sim Bern(p)$. We use the partisan lean data from FiveThirtyEight to determine $p$ here.
+
+Then, we define $Y$ as the *number of votes* cast for the Republican candidate in an election. Then, $Y \sim Binom(n, p)$. In general, congressional districts in the United States have around 711,000 residents. Of them, roughly 75 percent are eligible to vote. Of those eligible to vote, about 55 percent do vote in any given election. So, the actual $n$ is likely around $711,000 * .75 * .55 \approx 293,000$.
+
+However, we really want to use $X$. Summing up $i$ $X$'s and dividing by $i$ gives us $\overline X_{i}$, or the proportion of voters who cast a ballot for the Republican candidate out of $i$ total votes in a *single election*. Ideally, $i$ here would be 293,000 but the Central Limit Theorem allows us to approximate results so long as $i$ is sufficiently large.
+
+Using the Central Limit Theorem approximation, we then say that $\overline X_{i} \dot\sim Normal(\mu, \frac{\sigma}{\sqrt{n}})$, or $\overline X_{i} \dot\sim Normal(p, \sqrt{\frac{p(1-p)}{n}})$.
+
+Next, we define an indicator variable, $I(\overline X_{i} > .50)$. $I = 1$ when the Republican candidate achieves a vote share greater than $.50$, thereby winning the election, and $I = 0$ when the Republican candidate fails to do so, thereby losing the election. To calculate the probability that the Republican candidate wins the election, we find $P(I=1)$ using the normal distribution standardization process. $$ P(I=1) = P(\overline X_{i}>.50) = P(\frac{\overline X_{i} - p}{\sqrt\frac{p(1-p)}{n}} > \frac{.50-p}{\sqrt\frac{p(1-p)}{n}}) = P(Z>\frac{.50-p}{\sqrt\frac{p(1-p)}{n}})$$ $$= 1 - P(Z<\frac{.50-p}{\sqrt\frac{p(1-p)}{n}}) = 1 - \Phi(\frac{\sqrt{n}(.50-p)}{\sqrt{p(1-p)}})$$
+
+The $P(I=1)$ is the probability that the Republican candidate wins *one* election. So, to simulate many elections we define a new variable $R$ as the number of elections won by the Republican candidate. Then, $R \sim Binom(n$ simulations, $1 - \Phi(\frac{\sqrt{n}(.50-p)}{\sqrt{p(1-p)}}))$. Then, $\overline R_{k}$ is the average victory probability for the Republican candidate, simulated over $k$ trials. $\overline R_{k}$ will always be between 0 and 1.
+
+So, to determine how many Republicans will win seats in the Senate, we simulate each state and find the probability that the Republican candidate for Senate wins, simulated $n=50$ times, and sum them. We then multiply that number by 2, since each state has two Senators. Then, the number of Democrats in the Senate is just 100 - Republicans.
+
+To do those simulations, we employ the **Universality of the Uniform** (because actually running that many binomial trials would crash our computers, or so JJ says) with the the knowledge that Cumulative Distribution Functions are uniformly distributed. 
+
+We begin by randomly generating 50 integer values from 0 to 100 for each state. We then compare the randomly generated values with the probability that the Republican candidate wins one election. For example, if the Republican candidate has a 77% chance of winning the election and the randomly generated value is 80 (so, greater than 77), we say that the Republican candidate has won the election. This is done 50 times for each election (with 50 elections in the case of the Senate, one per state). Summing the election wins and dividing by 50 gives us the probability that the Republican candidate wins over 50 trials for that state. Then, summing over all the states and multiplying by 2 gives the expected number of Senate seats Republicans are expected to win.
+
+Various assumptions are built into this model. First, we assume that there are exactly two candidates: one Republican, one Democrat. In reality, there are often third-party candidates, uncontested elections, and elections with two candidates of the same party. This leads to the second assumption: we ignore many procedural specificities of actual elections. For example, we ignore the fact that only one third of the Senate is elected in each election cycle. We also ignore that some states---like California, Washingon, and Nebraska---use a top-two primary system, such that the two candidates for Senate might both be of the same party. Third, we assume that turnout is symmetric. Our partisan lean data from FiveThirtyEight compiles many polls and weights them by previous accuracy. But it might be the case that one party's voters are more likely to turn out than the other's, because of an enthusiasm gap, voter suppression, incumbency bias, or any number of other causes.
+
+### The Racial Model
+
+We are also interested in the racial representativeness of Congress. Unlike the partisan simulations in which there are only Republicans and Democrats, we break up each population into four groups: White, Black, Hispanic, and Asian/Native American/Pacific Islander. We group Asians, Native Americans, and Pacific Islanders because none of these groups are sufficiently large on their own and share some similarities in racial categorization.
+
+To simulate this, we follow a similar process with some modifications. First, we assume that people vote according to their racial demographics. Unlike the partisan elections model, we begin by assuming that there is a candidate for each racial group. Then, we use a **multinomial** process. As in the partisan simulations, we simulate the number of seats that Black candidates will win. Then, we simulate the number of seats that Hispanic candidates will win, the number of seats that Asian, Native American, and Pacific Islander candidates will win, and the number of seats that White candidates will win. Unfortunately, this method is not particularly effective when no group holds a majority, due to the shape of normal distributions. In that case, it is most likely that none reach the 50% threshold, so the simulation results in fewer projected victories than there are seats.
+
+To resolve this, we then group Black, Hispanic, and Asian/Native American/Pacific Islander into a non-White category. This means that we can follow a near identical process to the partisan simulations, simply substituting White and non-White for partisan affiliations.
+
+Like the partisan simulations, we assume that each demographic group votes in proportion to their population share. This is almost certainly not the case, due to voter suppression differentials, citizenship status, correlations of voting with wealth, and the socioeconomic and political histories of each group in American society.
+
+There is some reason to think the basic idea--that people vote according to their racial demographics--is accurate. Most Black Congress members represent majority-Black districts, and before 2018 only six represented majority-White districts. At the same time, the nine Black Congress members newly elected in the 2018 midterms [all came from heavily White districts](https://prospect.org/power/nine-new-democratic-black-congress-members-come-heavily-white-districts/).
+
+## Simulations and Analysis
+
+### The Senate
+#### Partisan Makeup
+First, we load in the partisan data, clean, and adjust it. We subtract 2.5 percentage points from both Republican and Democrat vote shares to add some "noise" to our model, and also to account for independents.
+
+```{r echo=FALSE, results='hide', message=FALSE}
+#Load in Senate data and convert FiveThirtyEight "lean" to partisan share
+Lean_States <- read_csv("fivethirtyeight_partisan_lean_STATES.csv", col_names = TRUE)
+#Change democrat to negative and republican to positive
+Lean_States$share_clean <- str_replace_all(Lean_States$pvi_538, "R", "")
+Lean_States$share_clean <- str_replace_all(Lean_States$share_clean, "D", "-")
+Lean_States$share_clean <- str_replace_all(Lean_States$share_clean, "\\+", "")
+#Convert to numeric, adjust for independents/noise
+Lean_States$share_clean <- as.numeric(Lean_States$share_clean)
+Lean_States$share_clean <- (Lean_States$share_clean/2 +50)/100
+Lean_States$share_adjust <- (Lean_States$share_clean - 0.025)
+```
+```{r echo=FALSE}
+data.frame(Lean_States$state, Lean_States$pvi_538, Lean_States$share_clean, Lean_States$share_adjust)
+```
+Next, we convert the partisan shares into standardized Z-scores and use the pnorm function to find the probability of a Republican victory, following the formulation from above: $P(I=1)=1 - \Phi(\frac{\sqrt{50}(.50-p)}{\sqrt{p(1-p)}})$.
+
+``` {r echo=FALSE}
+#Convert partisan shares to standardized Z-scores
+Lean_States$share_clean_standard <- (sqrt(50)*(.5 - Lean_States$share_clean))/sqrt(Lean_States$share_clean*(1 - Lean_States$share_clean))
+Lean_States$share_adjust_standard <- (sqrt(50)*(.5 - Lean_States$share_adjust))/sqrt(Lean_States$share_adjust*(1 - Lean_States$share_adjust))
+#Take phi of Z scores to find probability of republican victory
+Lean_States$c_phi <- (1 - pnorm(Lean_States$share_clean_standard)) * 100
+Lean_States$a_phi <- (1 - pnorm(Lean_States$share_adjust_standard)) * 100
+```
+```{r echo=FALSE}
+data.frame(Lean_States$state, Lean_States$share_clean, Lean_States$c_phi, Lean_States$share_adjust, Lean_States$a_phi)
+```
+Now, running the simulation we get:
+``` {r echo=FALSE}
+# Run simulation for number of republicans in the Senate.
+#cleaned
+set.seed(1791)
+Trial = function(length) sample(0:100,length,replace=T)
+Combined <- replicate(100, Trial(dim(Lean_States)[1]))
+Size <- Combined < Lean_States$c_phi
+clean_s_rep <- mean(apply(Size, 2, sum)) * 2
+paste("Senate Republicans:", clean_s_rep)
+```
+``` {r echo=FALSE}
+#adjusted
+set.seed(1837)
+Combined <- replicate(100, Trial(dim(Lean_States)[1]))
+Size <- Combined < Lean_States$a_phi
+adjusted_s_rep <- mean(apply(Size, 2, sum)) * 2
+paste("Senate Republicans, Adjusted:",adjusted_s_rep)
+```
+In fact, after the 2018 midterm elections there were 53 Republican senators, 45 Democratic senators, and 2 independent senators (Bernie Sanders of Vermont and Angus King of Maine, both of whom caucus with the Democrats). So, our adjusted prediction of `r adjusted_s_rep` Republican senators ends up being quite close in aggregate.
+
+#### Racial Makeup
+Now, we use racial demographic data from each state for the Senate.
+``` {r echo=FALSE}
+data.frame(Lean_States$state, Lean_States$white, Lean_States$black, Lean_States$hispanic, Lean_States$native_asian_pacific)
+```
+Using the formulation from above, we convert to standardized Z-scores and find the probability of each racial group's victory.
+
+``` {r echo=FALSE}
+#Convert racial shares to standardized Z-scores
+#White Z score
+Lean_States$white_standard <- ( sqrt(50)*(.5 - Lean_States$white) )/sqrt(Lean_States$white*(1 - Lean_States$white))
+#Black Z score
+Lean_States$black_standard <- (sqrt(50)*(.5 - Lean_States$black))/sqrt(Lean_States$black*(1 - Lean_States$black))
+#Hispanic Z score
+Lean_States$hispanic_standard <- (sqrt(50)*(.5 - Lean_States$hispanic))/sqrt(Lean_States$hispanic*(1 - Lean_States$hispanic))
+#Native-Asian-Pacific
+Lean_States$native_asian_pacific_standard <- (sqrt(50)*(.5 - Lean_States$native_asian_pacific))/sqrt(Lean_States$native_asian_pacific*(1 - Lean_States$native_asian_pacific))
+#Take phi of Z scores to find probability of each racial group victory
+Lean_States$white_phi <- (1 - pnorm(Lean_States$white_standard)) * 100
+Lean_States$black_phi <- (1 - pnorm(Lean_States$black_standard))*100
+Lean_States$hispanic_phi <- (1 - pnorm(Lean_States$hispanic_standard))*100
+Lean_States$native_asian_pacific_phi <- (1 - pnorm(Lean_States$native_asian_pacific_standard)) * 100
+```
+```{r echo=FALSE}
+data.frame(Lean_States$state, Lean_States$white_phi, Lean_States$black_phi, Lean_States$hispanic_phi, Lean_States$native_asian_pacific_phi)
+```
+Unfortunately, this model does not perform the way we might like. The normal distribution works well for simulating partisan makeup because either Republicans or Democrats almost always have a majority and there are only two possible outcomes. But in the case of racial groups, whites are the overwhelming majority in most states, and in the states without a white majority there is no other racial group which would constitute a majority. (The four states without a white majority are Hawai'i, New Mexico, California, and Texas.) As a result, any racial group winning more than 50% of the vote in a state without a racial majority is extremely low probability.
+
+Alternatively, we can split by White and non-White. Let's find the expected number of non-White senators.
+``` {r echo=FALSE}
+#Combine non-white shares.
+Lean_States$non_white <- Lean_States$black + Lean_States$hispanic + Lean_States$native_asian_pacific
+Lean_States$non_white_standard <- ( sqrt(50)*(.5 - Lean_States$non_white) )/sqrt(Lean_States$non_white*(1 - Lean_States$non_white))
+Lean_States$non_white_phi <- (1 - pnorm(Lean_States$non_white_standard))*100
+#Run simulation
+set.seed(1804)
+Trial = function(length) sample(0:100,length,replace=T)
+Combined <- replicate(100, Trial(dim(Lean_States)[1]))
+Size <- Combined < Lean_States$non_white_phi
+s_nonwhite <- mean(apply(Size, 2, sum)) * 2
+paste("Non-White Senators:", s_nonwhite)
+```
+It turns out that we *overestimate* with this measure---in fact, there are only 9 non-White senators! They are: Kamala Harris (D, CA), Marco Rubio (R, FL), Mazie Hirono (D, HI), Tammy Duckworth (D, IL), Cory Booker (D, NJ), Bob Menendez (D, NJ), Catherine Cortez Masto (D, NV), Tim Scott (R, SC), Ted Cruz (R, TX).
+
+#### Gender Makeup
+While fairly mundane in probability theory, it is also important to note the starkly unrepresentative gender makeup in the Senate. Of course, if people voted according to their gender demographics, we would expect the Senate to be composed of roughly fifty women and fifty men.
+
+In fact, there are just 26 women currently serving in the Senate, and only 57 women have *ever* served in the Senate.
+
+### The House of Representatives
+All of this is more interesting if we use data for the House of Representatives so that we can have more specific demographic shares. We work through two examples: Pennsylvania and Texas. These are selected for racial diversity (though with very different racial dynamics), and for relative partisan diversity.
+
+#### Pennsylvania
+Following the same procedure as used in the Senate simulations, we get:
+```{r echo=FALSE, message=FALSE}
+#Read in Pennsylvania data
+Lean_PA <- read_csv("fivethirtyeight_partisan_lean_PA.csv")
+#Change democrat to Negative and republican to positive
+Lean_PA$PA_share_clean <- str_replace_all(Lean_PA$pvi_538, "R", "")
+Lean_PA$PA_share_clean <- str_replace_all(Lean_PA$PA_share_clean, "D", "-")
+Lean_PA$PA_share_clean <- str_replace_all(Lean_PA$PA_share_clean, "\\+", "")
+#Convert to numeric, adjust for independents/noise
+Lean_PA$PA_share_clean <- as.numeric(Lean_PA$PA_share_clean)
+Lean_PA$PA_share_clean <- (Lean_PA$PA_share_clean/2 +50)/100
+Lean_PA$PA_share_adjust <- (Lean_PA$PA_share_clean - 0.025)
+#Convert partisan shares to standardized Z-scores
+Lean_PA$PA_share_clean_standard <- (sqrt(50)*(.5 - Lean_PA$PA_share_clean))/sqrt(Lean_PA$PA_share_clean*(1 - Lean_PA$PA_share_clean))
+Lean_PA$PA_share_adjust_standard <- (sqrt(50)*(.5 - Lean_PA$PA_share_adjust))/sqrt(Lean_PA$PA_share_adjust*(1 - Lean_PA$PA_share_adjust))
+#Take phi of Z scores to find probability of republican victory
+Lean_PA$c_phi <- (1 - pnorm(Lean_PA$PA_share_clean_standard)) * 100
+Lean_PA$a_phi <- (1 - pnorm(Lean_PA$PA_share_adjust_standard)) * 100
+
+data.frame(Lean_PA$district, Lean_PA$PA_share_clean, Lean_PA$c_phi, Lean_PA$PA_share_adjust, Lean_PA$a_phi)
+```
+``` {r echo=FALSE}
+#Run simulations for number of Republicans elected to the House from PA.
+set.seed(1803)
+Trial = function(length) sample(0:100,length,replace=T)
+#cleaned
+Combined <- replicate(100, Trial(dim(Lean_PA)[1]))
+Size <- Combined < Lean_PA$c_phi
+PA_house_rep <- mean(apply(Size, 2, sum))
+paste("Pennsylvania Republican Representatives:", PA_house_rep)
+#adjusted
+Combined <- replicate(100, Trial(dim(Lean_PA)[1]))
+Size <- Combined < Lean_PA$a_phi
+PA_house_rep_adj <- mean(apply(Size, 2, sum))
+paste("Pennsylvania Republican Representatives, Adjusted:", PA_house_rep_adj)
+```
+In fact, the 2018 midterm elections sent 9 Republican representatives to the House from Pennsylvania. So, our adjusted model is quite accurate here in aggregate. Note that this does not mean each seat was predicted correctly. For example, our model suggests that it is more likely than not (~62% chance) that the Republican candidate loses in District 1. In fact, Brian Fitzpatrick, the Republican candidate, did win. This ends up evening out with other predictions, resulting in a fairly accurate *count* but not the most accurate *predictions* for each district.
+
+Now, we repeat the process with racial data from Pennsylvania.
+``` {r echo=FALSE}
+#Convert to Z scores
+#White Z score
+Lean_PA$white_standard <- ( sqrt(50)*(.5 - Lean_PA$white) )/sqrt(Lean_PA$white*(1 - Lean_PA$white))
+#Black Z score
+Lean_PA$black_standard <- (sqrt(50)*(.5 - Lean_PA$black))/sqrt(Lean_PA$black*(1 - Lean_PA$black))
+#Hispanic Z score
+Lean_PA$hispanic_standard <- (sqrt(50)*(.5 - Lean_PA$hispanic))/sqrt(Lean_PA$hispanic*(1 - Lean_PA$hispanic))
+#Native-Asian-Pacific
+Lean_PA$native_asian_pacific_standard <- (sqrt(50)*(.5 - Lean_PA$native_asian_pacific))/sqrt(Lean_PA$native_asian_pacific*(1 - Lean_PA$native_asian_pacific))
+#Take phi of Z scores to find probability of each racial group victory
+Lean_PA$white_phi <- (1 - pnorm(Lean_PA$white_standard)) * 100
+Lean_PA$black_phi <- (1 - pnorm(Lean_PA$black_standard))*100
+Lean_PA$hispanic_phi <- (1 - pnorm(Lean_PA$hispanic_standard))*100
+Lean_PA$native_asian_pacific_phi <- (1 - pnorm(Lean_PA$native_asian_pacific_standard)) * 100
+data.frame(Lean_PA$district, Lean_PA$white, Lean_PA$white_phi, Lean_PA$black, Lean_PA$black_phi, Lean_PA$hispanic, Lean_PA$hispanic_phi, Lean_PA$native_asian_pacific, Lean_PA$native_asian_pacific_phi)
+```
+
+``` {r echo=FALSE}
+set.seed(1820)
+#Run simulations for number of white representatives
+Trial = function(length) sample(0:100,length,replace=T)
+Combined <- replicate(100, Trial(dim(Lean_PA)[1]))
+Size <- Combined < Lean_PA$white_phi
+PA_white_house <- mean(apply(Size, 2, sum))
+paste("White Pennsylvania Representatives:", PA_white_house)
+#Run simulations for number of black representatives
+Trial = function(length) sample(0:100,length,replace=T)
+Combined <- replicate(100, Trial(dim(Lean_PA)[1]))
+Size <- Combined < Lean_PA$black_phi
+PA_black_house <- mean(apply(Size, 2, sum))
+paste("Black Pennsylvania Representatives:", PA_black_house)
+#Run simulations for number of hispanic representatives
+Trial = function(length) sample(0:100,length,replace=T)
+Combined <- replicate(100, Trial(dim(Lean_PA)[1]))
+Size <- Combined < Lean_PA$hispanic_phi
+PA_hisp_house <- mean(apply(Size, 2, sum))
+paste("Hispanic Pennsylvania Representatives:", PA_hisp_house)
+```
+When we pursue a multinomial strategy, we end up with an expected `r PA_white_house + PA_hisp_house + PA_black_house` representatives, which is fewer than the 18 which in fact exist. This is because of the problems identified above when no racial group has a majority.
+```{r echo=FALSE}
+set.seed(1839)
+#Now, combining nonwhite
+Lean_PA$non_white <- Lean_PA$black + Lean_PA$hispanic + Lean_PA$native_asian_pacific
+Lean_PA$non_white_standard <- ( sqrt(50)*(.5 - Lean_PA$non_white) )/sqrt(Lean_PA$non_white*(1 - Lean_PA$non_white))
+Lean_PA$non_white_phi <- (1 - pnorm(Lean_PA$non_white_standard))*100
+#simulating
+Trial = function(length) sample(0:100,length,replace=T)
+Combined <- replicate(100, Trial(dim(Lean_PA)[1]))
+Size <- Combined < Lean_PA$non_white_phi
+PA_nonwhite_house <- mean(apply(Size, 2, sum))
+paste("Non-White Pennsylvania Representatives:", PA_nonwhite_house)
+```
+When we combine racial groups into White and non-White, we predict roughly 16 White representatives and 2 non-White Representatives. In fact, there is only one non-White Representative from Pennsylvania: Dwight Evans (D, D3). Evans, who is Black, comes from the district which encompasses West Philadelphia, most of Center City, and parts of North Philadelphia and is the only majority Black district in Pennsylvania.
+
+District 2 is also majority non-White, though there is no racial majority. Instead, roughly 27% of residents are Black, and 26% are Hispanic. When we assume that non-White residents vote in a bloc, they elect a non-White representative. In reality, Brendan Boyle (D, D2), who is White, was elected.
+
+This might suggest that in Pennsylvania Black and Hispanic voters see themselves as relatively distinct, or that partisanship and racial demographics do not track so closely. Of course, it could also simply be the case that Brendan Boyle was the strongest candidate in this highly Democratic district. The question of racial identification with partisanship in specific localities is the focus of much sociological and political scholarship that deserve longer treatment than we can offer here.
+
+#### Texas
+Now, let's be a bit more ambitious and work through data from Texas, which has 36 congressional districts.
+``` {r echo=FALSE, message=FALSE}
+#Read in Texas data
+Lean_TX <- read_csv("fivethirtyeight_partisan_lean_TX.csv")
+#Change democrat to Negative and republican to positive
+Lean_TX$TX_share_clean <- str_replace_all(Lean_TX$pvi_538, "R", "")
+Lean_TX$TX_share_clean <- str_replace_all(Lean_TX$TX_share_clean, "D", "-")
+Lean_TX$TX_share_clean <- str_replace_all(Lean_TX$TX_share_clean, "\\+", "")
+#Convert to numeric, adjust for independents/noise
+Lean_TX$TX_share_clean <- as.numeric(Lean_TX$TX_share_clean)
+Lean_TX$TX_share_clean <- (Lean_TX$TX_share_clean/2 +50)/100
+Lean_TX$TX_share_adjust <- (Lean_TX$TX_share_clean - 0.025)
+#Convert partisan shares to standardized Z-scores
+Lean_TX$TX_share_clean_standard <- (sqrt(50)*(.5 - Lean_TX$TX_share_clean))/sqrt(Lean_TX$TX_share_clean*(1 - Lean_TX$TX_share_clean))
+Lean_TX$TX_share_adjust_standard <- (sqrt(50)*(.5 - Lean_TX$TX_share_adjust))/sqrt(Lean_TX$TX_share_adjust*(1 - Lean_TX$TX_share_adjust))
+#Take phi of Z scores to find probability of republican victory
+Lean_TX$c_phi <- (1 - pnorm(Lean_TX$TX_share_clean_standard)) * 100
+Lean_TX$a_phi <- (1 - pnorm(Lean_TX$TX_share_adjust_standard)) * 100
+data.frame(Lean_TX$district, Lean_TX$TX_share_clean, Lean_TX$c_phi, Lean_TX$TX_share_adjust, Lean_TX$a_phi)
+```
+``` {r echo=FALSE}
+#Run trials for republicans
+set.seed(1865)
+Trial = function(length) sample(0:100,length,replace=T)
+#clean
+Combined <- replicate(100, Trial(dim(Lean_TX)[1]))
+Size <- Combined < Lean_TX$c_phi
+TX_house_rep <- mean(apply(Size, 2, sum))
+paste("Texas Republican Representatives:", TX_house_rep)
+#adjusted
+Combined <- replicate(100, Trial(dim(Lean_TX)[1]))
+Size <- Combined < Lean_TX$a_phi
+TX_house_rep_adj <- mean(apply(Size, 2, sum))
+paste("Texas Republican Representatives, Adjusted:", TX_house_rep_adj)
+```
+Our adjusted model predicts `r TX_house_rep_adj` representatives, and in fact 23 were elected. Pretty good! As before, our model does not perfectly predict every race (it is less consistent in close races, of course), but averages out to be fairly accurate since toss-ups should be won by the Democrat candidate and by the Republican candidate with equal probability, all things being equal.
+
+Now, we analyze the expected racial share of Texas representatives.
+```{r echo=FALSE}
+#Racial Groups Conversions
+#White Z score
+Lean_TX$white_standard <- ( sqrt(50)*(.5 - Lean_TX$white) )/sqrt(Lean_TX$white*(1 - Lean_TX$white))
+#Black Z score
+Lean_TX$black_standard <- (sqrt(50)*(.5 - Lean_TX$black))/sqrt(Lean_TX$black*(1 - Lean_TX$black))
+#Hispanic Z score
+Lean_TX$hispanic_standard <- (sqrt(50)*(.5 - Lean_TX$hispanic))/sqrt(Lean_TX$hispanic*(1 - Lean_TX$hispanic))
+#Native-Asian-Pacific
+Lean_TX$native_asian_pacific_standard <- (sqrt(50)*(.5 - Lean_TX$native_asian_pacific))/sqrt(Lean_TX$native_asian_pacific*(1 - Lean_TX$native_asian_pacific))
+#Take phi of Z scores to find probability of each racial group victory
+Lean_TX$white_phi <- (1 - pnorm(Lean_TX$white_standard)) * 100
+Lean_TX$black_phi <- (1 - pnorm(Lean_TX$black_standard))*100
+Lean_TX$hispanic_phi <- (1 - pnorm(Lean_TX$hispanic_standard))*100
+Lean_TX$native_asian_pacific_phi <- (1 - pnorm(Lean_TX$native_asian_pacific_standard)) * 100
+data.frame(Lean_TX$district, Lean_TX$white, Lean_TX$white_phi, Lean_TX$black, Lean_TX$black_phi, Lean_TX$hispanic, Lean_TX$hispanic_phi, Lean_TX$native_asian_pacific, Lean_TX$native_asian_pacific_phi)
+```
+``` {r echo=FALSE}
+#Run simulations for number of white representatives
+Trial = function(length) sample(0:100,length,replace=T)
+Combined <- replicate(100, Trial(dim(Lean_TX)[1]))
+Size <- Combined < Lean_TX$white_phi
+TX_white_house <- mean(apply(Size, 2, sum))
+paste("White Texas Representatives:", TX_white_house)
+#Run simulations for number of black representatives
+Trial = function(length) sample(0:100,length,replace=T)
+Combined <- replicate(100, Trial(dim(Lean_TX)[1]))
+Size <- Combined < Lean_TX$black_phi
+TX_black_house <- mean(apply(Size, 2, sum))
+paste("Black Texas Representatives:", TX_black_house)
+#Run simulations for number of hispanic representatives
+Trial = function(length) sample(0:100,length,replace=T)
+Combined <- replicate(100, Trial(dim(Lean_TX)[1]))
+Size <- Combined < Lean_TX$hispanic_phi
+TX_hisp_house <- mean(apply(Size, 2, sum))
+paste("Hispanic Texas Representatives:", TX_hisp_house)
+#Run simulations for number of asian/native/pacific islander representatives
+Trial = function(length) sample(0:100,length,replace=T)
+Combined <- replicate(100, Trial(dim(Lean_TX)[1]))
+Size <- Combined < Lean_TX$native_asian_pacific_phi
+TX_nap_house <- mean(apply(Size, 2, sum))
+paste("Asian, Native American, or Pacific Islander Texas Representatives:", TX_nap_house)
+```
+Our model predicts `r TX_white_house` White representatives, whereas in fact there are 23 white representatives. Our model also predicts `r TX_black_house+TX_hisp_house+TX_nap_house` non-White representatives when using the multinomial strategy. As an interesting result of that, we end up underestimating *both* White *and* non-White representatives because of the districts in which there is no racial majority.
+
+The model works better when combining non-White racial groups.
+``` {r}
+#Now combining non-white
+Lean_TX$non_white <- Lean_TX$black + Lean_TX$hispanic + Lean_TX$native_asian_pacific
+Lean_TX$non_white_standard <- ( sqrt(50)*(.5 - Lean_TX$non_white) )/sqrt(Lean_TX$non_white*(1 - Lean_TX$non_white))
+Lean_TX$non_white_phi <- (1 - pnorm(Lean_TX$non_white_standard))*100
+#Run simulation for non-white
+Trial = function(length) sample(0:100,length,replace=T)
+Combined <- replicate(100, Trial(dim(Lean_TX)[1]))
+Size <- Combined < Lean_TX$non_white_phi
+TX_nonwhite_house <- mean(apply(Size, 2, sum))
+paste("Non-White Texas Representatives:", TX_nonwhite_house)
+```
+Comparing the non-White result to the sum of the non-White categories is instructive. We estimate that, with various assumptions, half of Texas representatives to the House "should" be non-White. Instead, only 13 are. Note that Texas is not a majority White state--roughly 43.5 percent of Texans are white.
+
+Additionally, using the multinomial method our model suggests that there "should" be`r TX_hisp_house` Hispanic representatives and `r TX_black_house` Black representatives. In fact, there are 7 Hispanic candidates and 6 Black candidates. This is somewhat interesting, since Texas overall is roughly 13% Black and roughly 37% Hispanic, and since there are no majority-Black districts. This could have to do with the strong tradition of political organizing in Black communities in the South, or with any number of other socioeconomic and political factors. As above, this is better understood through sociological and political research which we cannot address in this length of work.
+
+Note also that this count closely resembles the count of districts which are majority non-White. In total, there are 15 districts which are majority non-White and 4 districts which are within 5 percentage points.
+
+However, only 13 Texas representatives are in fact non-White, and only two of those representatives are Republicans (Bill Flores, D17 and Will Hurd, D23). In addition, all but two of the non-White representatives were elected out of majority non-White districts, with the exceptions being Bill Flores (R, D17) and Colin Allred (D, D32). This lends some credibility to the idea that groups to vote predominantly along racial lines, or perhaps merely validates the well-known fact that racial minorities predominantly support the Democratic party.
+
+
+## Conclusions
+We end up with an elections simulator that is fairly accurate with respect to aggregate numbers of Republican and Democratic elected officials.
+
+We also glean a few specific insights:
+
+First, the multinomial method may not be the most helpful for us in cases where there is no majority demographic group. This is mostly because of how we define our indicator variable. Since we are interested in winning elections, the threshold of 50 percent of votes makes sense. But without a majority, that is very unlikely to happen over many trials.
+
+Second, Congress remains unrepresentative racially. In both Pennsylvania and Texas, we find that our model predicts far more non-White representative in Congress than there in fact are. This is unsurprising, since Congress is 20 percent non-White and the population is twice as non-White.
+
+Third, the racial dynamics of the Southwest and East of the country differ dramatically. In Pennsylvania, Black and Hispanic voters did not elect either a Hispanic or Black representative when together they held a majority. Instead, they elected a white representative. On the other hand, five Black representatives from Texas were elected by districts with non-Black majorities and substantial Hispanic population.
+
+By analyzing data from the Senate, from Pennsylvania, and from Texas, we show proof of concept that this kind of simulating is worthwhile. Future work might involve further refining the model to incorporate more factors that contribute to electoral success and failure. A very straightforward application of this model to the other 48 states would also yield interesting data worth studying. Certainly, the question of the representativeness of the United States' elected officials is worth considering across all axes, including partisanship, race, gender, and many more.
